@@ -9,6 +9,7 @@
     <CLIDEP>X</CLIDEP>
     <DDTEXT>Retail Z - Article master data</DDTEXT>
     <MASTERLANG>E</MASTERLANG>
+    <MAINFLAG>X</MAINFLAG>
     <CONTFLAG>A</CONTFLAG>
     <EXCLASS>1</EXCLASS>
    </DD02V>
@@ -109,6 +110,12 @@
      <COMPTYPE>E</COMPTYPE>
     </DD03P>
    </DD03P_TABLE>
+   <TABL_EXTRAS>
+    <TDDAT>
+     <TABNAME>ZRET_T_ARTICLE</TABNAME>
+     <CCLASS>&amp;NC&amp;</CCLASS>
+    </TDDAT>
+   </TABL_EXTRAS>
   </asx:values>
  </asx:abap>
 </abapGit>
