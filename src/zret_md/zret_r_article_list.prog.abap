@@ -1,75 +1,137 @@
 REPORT zret_r_article_list.
 
-*-----------------------------------------------------------------------
-* Retail - Active article list (v3: computed TTC price)
-*-----------------------------------------------------------------------
-
 TABLES zret_t_article.
 
-*-- Selection screen ----------------------------------------------------
-SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-b01.
-  SELECT-OPTIONS s_type FOR zret_t_article-article_type.
-  PARAMETERS     p_active AS CHECKBOX DEFAULT 'X'.
-SELECTION-SCREEN END OF BLOCK b1.
-
-*-- Types & data --------------------------------------------------------
-" Local structure: all fields of zret_t_article + one extra computed field
-TYPES: BEGIN OF ty_article_line.
+*-- Types: extend the DDIC structure with a computed field
+TYPES: BEGIN OF ty_article.
          INCLUDE TYPE zret_t_article.
 TYPES:   price_ttc TYPE zret_t_article-price,
-       END OF ty_article_line.
+       END OF ty_article,
+       ty_article_tab TYPE STANDARD TABLE OF ty_article WITH DEFAULT KEY.
 
-TYPES ty_article_tab TYPE STANDARD TABLE OF ty_article_line WITH DEFAULT KEY.
+*-- Selection screen
+SELECT-OPTIONS so_type FOR zret_t_article-article_type.
+PARAMETERS p_actv AS CHECKBOX DEFAULT 'X'.
 
+*-- Data
 DATA: lt_articles TYPE ty_article_tab,
       lo_alv      TYPE REF TO cl_salv_table.
 
-*-- Main ----------------------------------------------------------------
+*-- Local event handler class
+CLASS lcl_handler DEFINITION.
+  PUBLIC SECTION.
+    METHODS constructor
+      IMPORTING it_articles TYPE ty_article_tab.
+    METHODS on_double_click
+      FOR EVENT double_click OF cl_salv_events_table
+      IMPORTING row column.
+  PRIVATE SECTION.
+    DATA mt_articles TYPE ty_article_tab.
+ENDCLASS.
+
+CLASS lcl_handler IMPLEMENTATION.
+  METHOD constructor.
+    mt_articles = it_articles.
+  ENDMETHOD.
+
+METHOD on_double_click.
+    DATA(ls_article) = mt_articles[ row ].
+
+    CALL FUNCTION 'POPUP_TO_INFORM'
+      EXPORTING
+        titel = 'Article details'
+        txt1  = |Article: { ls_article-article_id } - { ls_article-article_name }|
+        txt2  = |Type: { ls_article-article_type }  -  EAN: { ls_article-ean }|
+        txt3  = |Price HT:  { ls_article-price } { ls_article-currency }|
+        txt4  = |Price TTC: { ls_article-price_ttc } { ls_article-currency }|.
+  ENDMETHOD.
+ENDCLASS.
+
+*-- Main
 START-OF-SELECTION.
 
-SELECT *
+  SELECT *
     FROM zret_t_article
-    WHERE article_type IN @s_type
-      AND ( @p_active = @abap_false OR active_flag = @abap_true )
+    WHERE article_type IN @so_type
+      AND ( @p_actv = 'X' AND active_flag = @abap_true
+         OR @p_actv = '' )
     ORDER BY article_id
     INTO TABLE @lt_articles.
 
-  IF sy-subrc <> 0 OR lt_articles IS INITIAL.
-    MESSAGE 'No articles match the selection.' TYPE 'S'.
+  IF lt_articles IS INITIAL.
+    MESSAGE 'Aucun article trouvé' TYPE 'I'.
     RETURN.
   ENDIF.
 
-LOOP AT lt_articles ASSIGNING FIELD-SYMBOL(<fs_article>).
-<fs_article>-price_ttc = <fs_article>-price * '1.20'.
-ENDLOOP.
+  " --- Compute TTC price ---
+  LOOP AT lt_articles ASSIGNING FIELD-SYMBOL(<fs_article>).
+    <fs_article>-price_ttc = <fs_article>-price * '1.20'.
+  ENDLOOP.
 
-  " Build the ALV
+  " --- Compute stats for header ---
+  DATA: lv_total     TYPE i,
+        lv_hard      TYPE i,
+        lv_soft      TYPE i,
+        lv_acce      TYPE i,
+        lv_cons      TYPE i,
+        lv_sum_price TYPE zret_t_article-price.
+
+  lv_total = lines( lt_articles ).
+
+  LOOP AT lt_articles ASSIGNING FIELD-SYMBOL(<fs_stat>).
+    lv_sum_price = lv_sum_price + <fs_stat>-price.
+    CASE <fs_stat>-article_type.
+      WHEN 'HARD'. lv_hard = lv_hard + 1.
+      WHEN 'SOFT'. lv_soft = lv_soft + 1.
+      WHEN 'ACCE'. lv_acce = lv_acce + 1.
+      WHEN 'CONS'. lv_cons = lv_cons + 1.
+    ENDCASE.
+  ENDLOOP.
+
+  " --- Build ALV ---
   TRY.
       cl_salv_table=>factory(
         IMPORTING r_salv_table = lo_alv
-        CHANGING  t_table      = lt_articles
+        CHANGING  t_table      = lt_articles ).
+
+      lo_alv->get_functions( )->set_all( abap_true ).
+      lo_alv->get_columns( )->set_optimize( abap_true ).
+
+      " --- Header ---
+      DATA(lo_header) = NEW cl_salv_form_layout_grid( ).
+
+      lo_header->create_label(
+        row    = 1
+        column = 1
+        text   = 'Article List - ZRET_R_ARTICLE_LIST'
       ).
+
+      lo_header->create_label(
+        row    = 2
+        column = 1
+        text   = |Date: { sy-datum DATE = USER }  -  User: { sy-uname }|
+      ).
+
+      lo_header->create_label(
+        row    = 3
+        column = 1
+        text   = |Total: { lv_total } articles  -  HARD: { lv_hard }  SOFT: { lv_soft }  ACCE: { lv_acce }  CONS: { lv_cons }|
+      ).
+
+      lo_header->create_label(
+        row    = 4
+        column = 1
+        text   = |Total value (HT): { lv_sum_price } EUR|
+      ).
+
+      lo_alv->set_top_of_list( lo_header ).
+
+      " --- Register double-click handler ---
+      DATA(lo_handler) = NEW lcl_handler( lt_articles ).
+      SET HANDLER lo_handler->on_double_click FOR lo_alv->get_event( ).
+
+      lo_alv->display( ).
+
     CATCH cx_salv_msg INTO DATA(lx_salv).
-      MESSAGE lx_salv->get_text( ) TYPE 'E'.
+      MESSAGE lx_salv TYPE 'E'.
   ENDTRY.
-lo_alv->get_functions( )->set_all( abap_true ).
-  lo_alv->get_columns( )->set_optimize( abap_true ).
-
-  " --- Build ALV top-of-list header ---
-  DATA(lo_header) = NEW cl_salv_form_layout_grid( ).
-
-  lo_header->create_label(
-    row    = 1
-    column = 1
-    text   = 'Retail article list'
-  ).
-
-  lo_header->create_label(
-    row    = 2
-    column = 1
-    text   = |Date: { sy-datum DATE = USER } - User: { sy-uname }|
-  ).
-
-  lo_alv->set_top_of_list( lo_header ).
-
-  lo_alv->display( ).
