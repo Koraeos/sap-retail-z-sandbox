@@ -52,7 +52,24 @@ ENDLOOP.
     CATCH cx_salv_msg INTO DATA(lx_salv).
       MESSAGE lx_salv->get_text( ) TYPE 'E'.
   ENDTRY.
-
-  lo_alv->get_functions( )->set_all( abap_true ).
+lo_alv->get_functions( )->set_all( abap_true ).
   lo_alv->get_columns( )->set_optimize( abap_true ).
+
+  " --- Build ALV top-of-list header ---
+  DATA(lo_header) = NEW cl_salv_form_layout_grid( ).
+
+  lo_header->create_label(
+    row    = 1
+    column = 1
+    text   = 'Retail article list'
+  ).
+
+  lo_header->create_label(
+    row    = 2
+    column = 1
+    text   = |Date: { sy-datum DATE = USER } - User: { sy-uname }|
+  ).
+
+  lo_alv->set_top_of_list( lo_header ).
+
   lo_alv->display( ).
