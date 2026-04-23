@@ -1,25 +1,27 @@
-CLASS zcx_ret_core DEFINITION
-  PUBLIC
-  INHERITING FROM cx_static_check
-  FINAL
-  CREATE PUBLIC .
+class ZCX_RET_CORE definition
+  public
+  inheriting from CX_STATIC_CHECK
+  final
+  create public .
 
-PUBLIC SECTION.
+public section.
 
-  INTERFACES if_t100_dyn_msg .
-  INTERFACES if_t100_message .
+  interfaces IF_T100_MESSAGE .
+  interfaces IF_T100_DYN_MSG .
 
-  METHODS constructor
-    IMPORTING
-      !textid LIKE if_t100_message=>t100key OPTIONAL
-      !previous LIKE previous OPTIONAL .
+  data ARTICLE_ID type ZRET_T_ARTICLE-ARTICLE_ID read-only .
+
+  methods CONSTRUCTOR
+    importing
+      !TEXTID like IF_T100_MESSAGE=>T100KEY optional
+      !PREVIOUS like PREVIOUS optional .
 PROTECTED SECTION.
 PRIVATE SECTION.
 ENDCLASS.
 
 
 
-CLASS zcx_ret_core IMPLEMENTATION.
+CLASS ZCX_RET_CORE IMPLEMENTATION.
 
 
   METHOD constructor ##ADT_SUPPRESS_GENERATION.
