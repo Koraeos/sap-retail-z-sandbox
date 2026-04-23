@@ -1,23 +1,24 @@
 *"* use this source file for your ABAP unit test classes
 
-CLASS ltcl_select_all DEFINITION FINAL FOR TESTING
+CLASS ltcl_article_tests DEFINITION FINAL FOR TESTING
   DURATION SHORT
   RISK LEVEL HARMLESS.
 
   PRIVATE SECTION.
     METHODS:
-      returns_all_active    FOR TESTING,
-      filter_by_hard_type   FOR TESTING,
-      ttc_is_ht_times_1_20  FOR TESTING,
-      hard_row_is_green     FOR TESTING,
-      raises_when_no_match  FOR TESTING.
+      returns_all_active             FOR TESTING,
+      filter_by_hard_type            FOR TESTING,
+      ttc_is_ht_times_1_20           FOR TESTING,
+      hard_row_is_green              FOR TESTING,
+      raises_when_no_match           FOR TESTING,
+      get_by_id_returns_article      FOR TESTING,
+      get_by_id_raises_if_not_found  FOR TESTING.
 ENDCLASS.
 
 
-CLASS ltcl_select_all IMPLEMENTATION.
+CLASS ltcl_article_tests IMPLEMENTATION.
 
   METHOD returns_all_active.
-    " No filter, only active articles by default
     TRY.
         DATA(lt_result) = zcl_ret_article=>select_all( ).
         cl_abap_unit_assert=>assert_equals(
@@ -46,7 +47,7 @@ CLASS ltcl_select_all IMPLEMENTATION.
   ENDMETHOD.
 
 
-METHOD ttc_is_ht_times_1_20.
+  METHOD ttc_is_ht_times_1_20.
     DATA lv_expected TYPE zret_t_article-price.
 
     TRY.
@@ -93,5 +94,30 @@ METHOD ttc_is_ht_times_1_20.
         " Expected - test passes
     ENDTRY.
   ENDMETHOD.
+
+
+  METHOD get_by_id_returns_article.
+    TRY.
+        DATA(ls_article) = zcl_ret_article=>get_by_id( 'ART001' ).
+        cl_abap_unit_assert=>assert_equals(
+          act = ls_article-article_id
+          exp = 'ART001'
+          msg = 'Should return ART001' ).
+        cl_abap_unit_assert=>assert_not_initial(
+          act = ls_article-price_ttc
+          msg = 'TTC should be computed after get_by_id' ).
+      CATCH zcx_ret_core.
+        cl_abap_unit_assert=>fail( 'ART001 exists - no exception expected' ).
+    ENDTRY.
+  ENDMETHOD.
+
+METHOD get_by_id_raises_if_not_found.
+       TRY.
+           zcl_ret_article=>get_by_id( 'ZZ999' ).
+           cl_abap_unit_assert=>fail( 'Should have raised zcx_ret_core for unknown ID' ).
+         CATCH zcx_ret_core.
+           " Expected - test passes
+       ENDTRY.
+     ENDMETHOD.
 
 ENDCLASS.

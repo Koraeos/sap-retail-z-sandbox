@@ -23,8 +23,19 @@ CLASS zcl_ret_article DEFINITION
       RETURNING VALUE(rt_articles) TYPE ty_article_tab
       RAISING   zcx_ret_core.
 
+    CLASS-METHODS get_by_id
+      IMPORTING iv_article_id     TYPE zret_t_article-article_id
+      RETURNING VALUE(rs_article) TYPE ty_article
+      RAISING   zcx_ret_core.
+
   PROTECTED SECTION.
+
   PRIVATE SECTION.
+
+    "! Enriches an article with computed TTC price and row color (by type).
+    CLASS-METHODS enrich_article
+      CHANGING cs_article TYPE ty_article.
+
 ENDCLASS.
 
 
@@ -32,9 +43,43 @@ ENDCLASS.
 CLASS ZCL_RET_ARTICLE IMPLEMENTATION.
 
 
+  METHOD enrich_article.
+    DATA ls_color TYPE lvc_s_scol.
+
+    " Compute TTC price
+    cs_article-price_ttc = cs_article-price * c_vat_rate.
+
+    " Assign row color by article type
+    CASE cs_article-article_type.
+      WHEN 'HARD'. ls_color-color-col = 5.  " green
+      WHEN 'SOFT'. ls_color-color-col = 1.  " blue
+      WHEN 'ACCE'. ls_color-color-col = 3.  " yellow
+      WHEN 'CONS'. ls_color-color-col = 7.  " orange
+    ENDCASE.
+    ls_color-color-int = 1.
+    APPEND ls_color TO cs_article-t_color.
+  ENDMETHOD.
+
+
+  METHOD get_by_id.
+    DATA ls_db TYPE zret_t_article.
+
+    SELECT SINGLE *
+      FROM zret_t_article
+      WHERE article_id = @iv_article_id
+      INTO @ls_db.
+
+    IF sy-subrc <> 0.
+RAISE EXCEPTION TYPE zcx_ret_core.
+    ENDIF.
+
+    rs_article = CORRESPONDING #( ls_db ).
+    enrich_article( CHANGING cs_article = rs_article ).
+  ENDMETHOD.
+
+
   METHOD select_all.
-    DATA: lt_db    TYPE STANDARD TABLE OF zret_t_article,
-          ls_color TYPE lvc_s_scol.
+    DATA lt_db TYPE STANDARD TABLE OF zret_t_article.
 
     SELECT *
       FROM zret_t_article
@@ -51,17 +96,7 @@ CLASS ZCL_RET_ARTICLE IMPLEMENTATION.
     rt_articles = CORRESPONDING #( lt_db ).
 
     LOOP AT rt_articles ASSIGNING FIELD-SYMBOL(<fs_article>).
-      <fs_article>-price_ttc = <fs_article>-price * c_vat_rate.
-
-      CLEAR ls_color.
-      CASE <fs_article>-article_type.
-        WHEN 'HARD'. ls_color-color-col = 5.  " green
-        WHEN 'SOFT'. ls_color-color-col = 1.  " blue
-        WHEN 'ACCE'. ls_color-color-col = 3.  " yellow
-        WHEN 'CONS'. ls_color-color-col = 7.  " orange
-      ENDCASE.
-      ls_color-color-int = 1.
-      APPEND ls_color TO <fs_article>-t_color.
+      enrich_article( CHANGING cs_article = <fs_article> ).
     ENDLOOP.
   ENDMETHOD.
 ENDCLASS.
