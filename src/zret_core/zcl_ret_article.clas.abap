@@ -28,58 +28,32 @@ CLASS zcl_ret_article DEFINITION
       RETURNING VALUE(rs_article) TYPE ty_article
       RAISING   zcx_ret_core.
 
+    CLASS-METHODS create
+      IMPORTING is_article TYPE zret_t_article
+      RAISING   zcx_ret_core.
+
+    CLASS-METHODS update
+      IMPORTING is_article TYPE zret_t_article
+      RAISING   zcx_ret_core.
+
+    CLASS-METHODS delete
+      IMPORTING iv_article_id TYPE zret_t_article-article_id
+      RAISING   zcx_ret_core.
+
   PROTECTED SECTION.
 
   PRIVATE SECTION.
 
-    "! Enriches an article with computed TTC price and row color (by type).
     CLASS-METHODS enrich_article
       CHANGING cs_article TYPE ty_article.
 
 ENDCLASS.
 
 
-
-CLASS ZCL_RET_ARTICLE IMPLEMENTATION.
-
-
-  METHOD enrich_article.
-    DATA ls_color TYPE lvc_s_scol.
-
-    " Compute TTC price
-    cs_article-price_ttc = cs_article-price * c_vat_rate.
-
-    " Assign row color by article type
-    CASE cs_article-article_type.
-      WHEN 'HARD'. ls_color-color-col = 5.  " green
-      WHEN 'SOFT'. ls_color-color-col = 1.  " blue
-      WHEN 'ACCE'. ls_color-color-col = 3.  " yellow
-      WHEN 'CONS'. ls_color-color-col = 7.  " orange
-    ENDCASE.
-    ls_color-color-int = 1.
-    APPEND ls_color TO cs_article-t_color.
-  ENDMETHOD.
-
-
-  METHOD get_by_id.
-    DATA ls_db TYPE zret_t_article.
-
-    SELECT SINGLE *
-      FROM zret_t_article
-      WHERE article_id = @iv_article_id
-      INTO @ls_db.
-
-    IF sy-subrc <> 0.
-RAISE EXCEPTION TYPE zcx_ret_core.
-    ENDIF.
-
-    rs_article = CORRESPONDING #( ls_db ).
-    enrich_article( CHANGING cs_article = rs_article ).
-  ENDMETHOD.
-
+CLASS zcl_ret_article IMPLEMENTATION.
 
   METHOD select_all.
-    DATA lt_db TYPE STANDARD TABLE OF zret_t_article.
+    DATA: lt_db TYPE STANDARD TABLE OF zret_t_article.
 
     SELECT *
       FROM zret_t_article
@@ -99,4 +73,171 @@ RAISE EXCEPTION TYPE zcx_ret_core.
       enrich_article( CHANGING cs_article = <fs_article> ).
     ENDLOOP.
   ENDMETHOD.
+
+
+  METHOD get_by_id.
+    DATA ls_db TYPE zret_t_article.
+
+    SELECT SINGLE *
+      FROM zret_t_article
+      WHERE article_id = @iv_article_id
+      INTO @ls_db.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = iv_article_id.
+    ENDIF.
+
+    rs_article = CORRESPONDING #( ls_db ).
+    enrich_article( CHANGING cs_article = rs_article ).
+  ENDMETHOD.
+
+
+  METHOD create.
+    " --- Input validation (fail fast) ---
+    IF is_article-article_id IS INITIAL.
+      RAISE EXCEPTION TYPE zcx_ret_core.
+    ENDIF.
+
+    IF is_article-article_name IS INITIAL
+    OR is_article-price        <= 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = is_article-article_id.
+    ENDIF.
+
+    " --- Unicity check ---
+    SELECT SINGLE article_id
+      FROM zret_t_article
+      WHERE article_id = @is_article-article_id
+      INTO @DATA(lv_found).
+
+    IF sy-subrc = 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = is_article-article_id.
+    ENDIF.
+
+    " --- Prepare record with audit defaults ---
+    DATA ls_db TYPE zret_t_article.
+    ls_db             = is_article.
+    ls_db-mandt       = sy-mandt.
+    ls_db-created_by  = sy-uname.
+    ls_db-created_on  = sy-datum.
+    ls_db-changed_by  = sy-uname.
+    ls_db-changed_on  = sy-datum.
+    IF ls_db-active_flag IS INITIAL.
+      ls_db-active_flag = abap_true.
+    ENDIF.
+
+    " --- Persist ---
+    INSERT zret_t_article FROM @ls_db.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = is_article-article_id.
+    ENDIF.
+
+    COMMIT WORK.
+  ENDMETHOD.
+
+
+  METHOD update.
+    " --- Input validation ---
+    IF is_article-article_id IS INITIAL.
+      RAISE EXCEPTION TYPE zcx_ret_core.
+    ENDIF.
+
+    IF is_article-article_name IS INITIAL
+    OR is_article-price        <= 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = is_article-article_id.
+    ENDIF.
+
+    " --- Existence check + load current audit fields ---
+    DATA ls_existing TYPE zret_t_article.
+    SELECT SINGLE *
+      FROM zret_t_article
+      WHERE article_id = @is_article-article_id
+      INTO @ls_existing.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = is_article-article_id.
+    ENDIF.
+
+    " --- Prepare record preserving created_* + refreshing changed_* ---
+    DATA ls_db TYPE zret_t_article.
+    ls_db            = is_article.
+    ls_db-mandt      = sy-mandt.
+    ls_db-created_by = ls_existing-created_by.
+    ls_db-created_on = ls_existing-created_on.
+    ls_db-changed_by = sy-uname.
+    ls_db-changed_on = sy-datum.
+
+    " --- Persist ---
+    UPDATE zret_t_article FROM @ls_db.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = is_article-article_id.
+    ENDIF.
+
+    COMMIT WORK.
+  ENDMETHOD.
+
+
+  METHOD delete.
+    " --- Input validation ---
+    IF iv_article_id IS INITIAL.
+      RAISE EXCEPTION TYPE zcx_ret_core.
+    ENDIF.
+
+    " --- Existence check ---
+    SELECT SINGLE article_id
+      FROM zret_t_article
+      WHERE article_id = @iv_article_id
+      INTO @DATA(lv_found).
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = iv_article_id.
+    ENDIF.
+
+    " --- Soft delete: flip active_flag to false ---
+    UPDATE zret_t_article
+      SET active_flag = @abap_false,
+          changed_by  = @sy-uname,
+          changed_on  = @sy-datum
+      WHERE article_id = @iv_article_id.
+
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_ret_core
+        EXPORTING
+          article_id = iv_article_id.
+    ENDIF.
+
+    COMMIT WORK.
+  ENDMETHOD.
+
+
+  METHOD enrich_article.
+    DATA ls_color TYPE lvc_s_scol.
+
+    cs_article-price_ttc = cs_article-price * c_vat_rate.
+
+    CASE cs_article-article_type.
+      WHEN 'HARD'. ls_color-color-col = 5.
+      WHEN 'SOFT'. ls_color-color-col = 1.
+      WHEN 'ACCE'. ls_color-color-col = 3.
+      WHEN 'CONS'. ls_color-color-col = 7.
+    ENDCASE.
+    ls_color-color-int = 1.
+    APPEND ls_color TO cs_article-t_color.
+  ENDMETHOD.
+
 ENDCLASS.
