@@ -5,7 +5,7 @@ CLASS zcl_ret_sales_order DEFINITION
 
   PUBLIC SECTION.
 
-    " Input type: what the caller fills in to declare an item
+    " Input type for create
     TYPES: BEGIN OF ty_item_input,
              article_id TYPE zde_ret_article_id,
              quantity   TYPE p LENGTH 7 DECIMALS 3,
@@ -14,7 +14,7 @@ CLASS zcl_ret_sales_order DEFINITION
 
     TYPES: ty_item_input_tab TYPE STANDARD TABLE OF ty_item_input WITH DEFAULT KEY.
 
-    " Output type: full sales order (header + persisted items)
+    " Output types
     TYPES: ty_item_tab TYPE STANDARD TABLE OF zret_t_so_item WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ty_full,
@@ -22,7 +22,13 @@ CLASS zcl_ret_sales_order DEFINITION
              items  TYPE ty_item_tab,
            END OF ty_full.
 
-    " Status constants: avoids magic strings 'O'/'D'/'B'/'C' scattered everywhere
+    TYPES: ty_so_tab TYPE STANDARD TABLE OF zret_t_so WITH DEFAULT KEY.
+
+    " Range types for select_all filters
+    TYPES: ty_customer_range TYPE RANGE OF zret_t_so-customer_id.
+    TYPES: ty_status_range   TYPE RANGE OF zret_t_so-status.
+
+    " Status constants
     CONSTANTS: BEGIN OF c_status,
                  open      TYPE zret_t_so-status VALUE 'O',
                  delivered TYPE zret_t_so-status VALUE 'D',
@@ -41,6 +47,13 @@ CLASS zcl_ret_sales_order DEFINITION
       RETURNING VALUE(rs_full) TYPE ty_full
       RAISING   zcx_ret_core.
 
+    "! Returns a filtered list of Sales Orders.
+    "! Returns empty table if no SO matches (no exception, unlike article).
+    CLASS-METHODS select_all
+      IMPORTING it_customer_range TYPE ty_customer_range OPTIONAL
+                it_status_range   TYPE ty_status_range   OPTIONAL
+      RETURNING VALUE(rt_so)      TYPE ty_so_tab.
+
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -53,7 +66,7 @@ ENDCLASS.
 CLASS zcl_ret_sales_order IMPLEMENTATION.
 
   METHOD create.
-    " --- 1. Header validation (fail fast) ---
+    " --- 1. Header validation ---
     IF is_header-customer_id IS INITIAL
     OR is_header-currency    IS INITIAL.
       RAISE EXCEPTION TYPE zcx_ret_core.
@@ -66,7 +79,7 @@ CLASS zcl_ret_sales_order IMPLEMENTATION.
     " --- 2. Generate new SO number ---
     rv_so_number = generate_so_number( ).
 
-    " --- 3. Build header with audit + status defaults ---
+    " --- 3. Build header ---
     DATA ls_header TYPE zret_t_so.
     ls_header            = is_header.
     ls_header-mandt      = sy-mandt.
@@ -78,19 +91,15 @@ CLASS zcl_ret_sales_order IMPLEMENTATION.
     ls_header-changed_by = sy-uname.
     ls_header-changed_on = sy-datum.
 
-    " --- 4. Process each item: validate via Article class + snapshot + accumulate ---
+    " --- 4. Process each item ---
     DATA: lt_items_db TYPE ty_item_tab,
           ls_item_db  TYPE zret_t_so_item,
           lv_total    TYPE p LENGTH 8 DECIMALS 2,
           lv_item_no  TYPE n LENGTH 6 VALUE '000010'.
 
     LOOP AT it_items INTO DATA(ls_input).
-      " *** THIS IS THE "CLICK MENTAL" LINE ***
-      " Delegate article validation to the Article class.
-      " If article doesn't exist, get_by_id raises zcx_ret_core which bubbles up.
       DATA(ls_article) = zcl_ret_article=>get_by_id( ls_input-article_id ).
 
-      " Build the persisted item (snapshot of master data at order time)
       CLEAR ls_item_db.
       ls_item_db-mandt        = sy-mandt.
       ls_item_db-so_number    = rv_so_number.
@@ -111,13 +120,12 @@ CLASS zcl_ret_sales_order IMPLEMENTATION.
 
       APPEND ls_item_db TO lt_items_db.
       lv_total = lv_total + ls_item_db-line_amount.
-
       lv_item_no = lv_item_no + 10.
     ENDLOOP.
 
     ls_header-total_amount = lv_total.
 
-    " --- 5. Persist header + items in one atomic transaction ---
+    " --- 5. Persist header + items atomically ---
     INSERT zret_t_so FROM @ls_header.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zcx_ret_core.
@@ -148,6 +156,16 @@ CLASS zcl_ret_sales_order IMPLEMENTATION.
       WHERE so_number = @iv_so_number
       ORDER BY item_number
       INTO TABLE @rs_full-items.
+  ENDMETHOD.
+
+
+  METHOD select_all.
+    SELECT *
+      FROM zret_t_so
+      WHERE customer_id IN @it_customer_range
+        AND status      IN @it_status_range
+      ORDER BY so_number
+      INTO TABLE @rt_so.
   ENDMETHOD.
 
 
