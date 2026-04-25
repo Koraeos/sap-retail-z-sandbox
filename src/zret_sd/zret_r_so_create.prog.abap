@@ -3,7 +3,6 @@ REPORT zret_r_so_create.
 " Header parameters
 PARAMETERS:
   p_custid    TYPE zret_t_so-customer_id    OBLIGATORY,
-  p_custnm    TYPE zret_t_so-customer_name  OBLIGATORY,
   p_curr      TYPE zret_t_so-currency       OBLIGATORY DEFAULT 'EUR'.
 
 SELECTION-SCREEN SKIP 1.
@@ -19,13 +18,12 @@ PARAMETERS:
 
 START-OF-SELECTION.
 
-  " Build header from selection screen input
+  " Build header (customer_name auto-filled by the class from customer master)
   DATA ls_header TYPE zret_t_so.
-  ls_header-customer_id   = p_custid.
-  ls_header-customer_name = p_custnm.
-  ls_header-currency      = p_curr.
+  ls_header-customer_id = p_custid.
+  ls_header-currency    = p_curr.
 
-  " Build items list (skip empty rows)
+  " Build items list
   DATA lt_items TYPE zcl_ret_sales_order=>ty_item_input_tab.
 
   IF p_art1 IS NOT INITIAL AND p_qty1 IS NOT INITIAL.
@@ -46,5 +44,5 @@ START-OF-SELECTION.
       MESSAGE |Sales Order { lv_so_number } created successfully| TYPE 'S'.
 
     CATCH zcx_ret_core.
-      MESSAGE 'Sales Order creation failed: invalid input or unknown article' TYPE 'E'.
+      MESSAGE 'Sales Order creation failed: invalid customer, article, or input' TYPE 'E'.
   ENDTRY.

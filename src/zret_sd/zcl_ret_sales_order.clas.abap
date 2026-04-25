@@ -5,7 +5,6 @@ CLASS zcl_ret_sales_order DEFINITION
 
   PUBLIC SECTION.
 
-    " Input type for create
     TYPES: BEGIN OF ty_item_input,
              article_id TYPE zde_ret_article_id,
              quantity   TYPE p LENGTH 7 DECIMALS 3,
@@ -13,9 +12,7 @@ CLASS zcl_ret_sales_order DEFINITION
            END OF ty_item_input.
 
     TYPES: ty_item_input_tab TYPE STANDARD TABLE OF ty_item_input WITH DEFAULT KEY.
-
-    " Output types
-    TYPES: ty_item_tab TYPE STANDARD TABLE OF zret_t_so_item WITH DEFAULT KEY.
+    TYPES: ty_item_tab       TYPE STANDARD TABLE OF zret_t_so_item WITH DEFAULT KEY.
 
     TYPES: BEGIN OF ty_full,
              header TYPE zret_t_so,
@@ -24,11 +21,9 @@ CLASS zcl_ret_sales_order DEFINITION
 
     TYPES: ty_so_tab TYPE STANDARD TABLE OF zret_t_so WITH DEFAULT KEY.
 
-    " Range types for select_all filters
     TYPES: ty_customer_range TYPE RANGE OF zret_t_so-customer_id.
     TYPES: ty_status_range   TYPE RANGE OF zret_t_so-status.
 
-    " Status constants
     CONSTANTS: BEGIN OF c_status,
                  open      TYPE zret_t_so-status VALUE 'O',
                  delivered TYPE zret_t_so-status VALUE 'D',
@@ -47,8 +42,6 @@ CLASS zcl_ret_sales_order DEFINITION
       RETURNING VALUE(rs_full) TYPE ty_full
       RAISING   zcx_ret_core.
 
-    "! Returns a filtered list of Sales Orders.
-    "! Returns empty table if no SO matches (no exception, unlike article).
     CLASS-METHODS select_all
       IMPORTING it_customer_range TYPE ty_customer_range OPTIONAL
                 it_status_range   TYPE ty_status_range   OPTIONAL
@@ -76,22 +69,26 @@ CLASS zcl_ret_sales_order IMPLEMENTATION.
       RAISE EXCEPTION TYPE zcx_ret_core.
     ENDIF.
 
-    " --- 2. Generate new SO number ---
+    " --- 2. Validate customer exists in master + grab the name to snapshot ---
+    DATA(ls_customer) = zcl_ret_customer=>get_by_id( is_header-customer_id ).
+
+    " --- 3. Generate new SO number ---
     rv_so_number = generate_so_number( ).
 
-    " --- 3. Build header ---
+    " --- 4. Build header (customer_name comes from master, not from input) ---
     DATA ls_header TYPE zret_t_so.
-    ls_header            = is_header.
-    ls_header-mandt      = sy-mandt.
-    ls_header-so_number  = rv_so_number.
-    ls_header-so_date    = sy-datum.
-    ls_header-status     = c_status-open.
-    ls_header-created_by = sy-uname.
-    ls_header-created_on = sy-datum.
-    ls_header-changed_by = sy-uname.
-    ls_header-changed_on = sy-datum.
+    ls_header                = is_header.
+    ls_header-mandt          = sy-mandt.
+    ls_header-so_number      = rv_so_number.
+    ls_header-so_date        = sy-datum.
+    ls_header-status         = c_status-open.
+    ls_header-customer_name  = ls_customer-customer_name.  " <-- snapshot from master
+    ls_header-created_by     = sy-uname.
+    ls_header-created_on     = sy-datum.
+    ls_header-changed_by     = sy-uname.
+    ls_header-changed_on     = sy-datum.
 
-    " --- 4. Process each item ---
+    " --- 5. Process items via Article class ---
     DATA: lt_items_db TYPE ty_item_tab,
           ls_item_db  TYPE zret_t_so_item,
           lv_total    TYPE p LENGTH 8 DECIMALS 2,
@@ -125,7 +122,7 @@ CLASS zcl_ret_sales_order IMPLEMENTATION.
 
     ls_header-total_amount = lv_total.
 
-    " --- 5. Persist header + items atomically ---
+    " --- 6. Persist atomically ---
     INSERT zret_t_so FROM @ls_header.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zcx_ret_core.
