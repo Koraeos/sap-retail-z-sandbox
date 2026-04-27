@@ -1,0 +1,4 @@
+@EndUserText.label: 'Retail Z - Sales Order service definition'
+define service ZSD_RET_SO {
+  expose ZC_RET_SO_HEADER as SalesOrders;
+}

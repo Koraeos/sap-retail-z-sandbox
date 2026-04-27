@@ -1,0 +1,8 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "ZRET_T_CUSTOMER",
+      "ZRET_T_SO"
+    ]
+  }
+}
