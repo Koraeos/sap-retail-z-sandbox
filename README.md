@@ -19,8 +19,9 @@ The goal is twofold:
 
 - ✅ **Complete Order-to-Cash cycle in custom Z**: Sales Order → Delivery → Invoice with status transitions (`Open` → `Delivered` → `Billed`)
 - ✅ **Pseudo-EWM warehouse module**: PO → Goods Receipt → auto-Putaway task → Pick → auto-Load task → Goods Issue, with zone-aware stock (RECV / STORAGE / STAGING / LOAD_DOCK)
-- ✅ **9 domain classes** that compose each other across modules (Sales, Procurement, Stock, Warehouse Tasks)
-- ✅ **46 ABAP Unit tests green** — uncommon in the ABAP world, signals production-grade rigor
+- ✅ **Partner Roles SAP-style (KNVP pattern)**: Sold-to / Ship-to / Bill-to / Payer with `partner_counter` for multi-Ship-to scenarios, smart fallback to sold-to, scenarios B2C + B2B Decathlon-style with HQ + 3 regional depots
+- ✅ **10 domain classes** that compose each other across modules (Sales, Procurement, Stock, Warehouse Tasks, Partner Functions)
+- ✅ **52 ABAP Unit tests green** — uncommon in the ABAP world, signals production-grade rigor
 - ✅ **Atomic transactions** with `COMMIT WORK` / `ROLLBACK WORK` — multi-table updates respect business invariants
 - ✅ **Snapshot pattern** on every transactional document — customer/article/supplier/price values are frozen at transaction time for audit traceability
 - ✅ **Append-only stock movement journal** with typed movements (101 Goods Receipt, 311 Transfer, 411 Pick, 412 Load, 561 Initial, 601 Goods Issue) mirroring SAP MM-IM standard codes
@@ -101,6 +102,10 @@ The project follows a clean **layered OO approach** — uncommon in the ABAP wor
 ║                            (composes Sales Order + Site + Customer)      ║
 ║    ZCL_RET_INVOICE        select_all, get_by_id, create_from_deliv      ║
 ║                            (composes Delivery + Sales Order)             ║
+║    ZCL_RET_CUST_PARTNER   seed_partner_functions, assign_partner,        ║
+║                            get_partners, get_partner_for_function        ║
+║                            (with smart fallback), deactivate_partner     ║
+║                            (KNVP pattern with auto-incremented counter)  ║
 ║                                                                          ║
 ║  Procurement & Warehouse:                                                ║
 ║    ZCL_RET_PURCH_ORDER    create_po, post_goods_receipt, get_header,     ║
@@ -123,10 +128,12 @@ The project follows a clean **layered OO approach** — uncommon in the ABAP wor
 ║    ZRET_T_ARTICLE   ZRET_T_CUSTOMER   ZRET_T_SITE                        ║
 ║    ZRET_T_SUPPLIER  (created for the EWM phase)                          ║
 ║                                                                          ║
-║  Sales (6):                                                              ║
+║  Sales (8):                                                              ║
 ║    ZRET_T_SO + ZRET_T_SO_ITEM                                            ║
 ║    ZRET_T_DELIV + ZRET_T_DELIV_ITE                                       ║
 ║    ZRET_T_INV + ZRET_T_INV_ITEM                                          ║
+║    ZRET_T_PART_FCT       partner functions reference (AG/WE/RE/RG)       ║
+║    ZRET_T_CUST_PRT       customer × partner_function × counter           ║
 ║                                                                          ║
 ║  Procurement (2):                                                        ║
 ║    ZRET_T_PO + ZRET_T_PO_ITEM                                            ║
@@ -137,7 +144,7 @@ The project follows a clean **layered OO approach** — uncommon in the ABAP wor
 ║    ZRET_T_STK_MVT     append-only movement journal                       ║
 ║    ZRET_T_WH_TASK     warehouse tasks (Putaway / Pick / Load)            ║
 ║                                                                          ║
-║  Domains with fixed values (11 total):                                   ║
+║  Domains with fixed values (13 total):                                   ║
 ║    ZDO_RET_SO_STATUS    (O / D / B / C)                                  ║
 ║    ZDO_RET_DELIV_STATUS (C / S / R)                                      ║
 ║    ZDO_RET_INV_STATUS   (O / P / V)                                      ║
@@ -146,6 +153,8 @@ The project follows a clean **layered OO approach** — uncommon in the ABAP wor
 ║    ZRET_D_PO_STATUS     (O / I / D / C / X)                              ║
 ║    ZRET_D_WH_TASK_TYPE  (PUTAWAY / PICK / LOAD)                          ║
 ║    ZRET_D_WH_TASK_STAT  (O / C / X)                                      ║
+║    ZDOM_RET_PART_FCT    (AG / WE / RE / RG)  Partner functions           ║
+║    ZDOM_RET_CUST_TYPE   (B2B / B2C)                                      ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -325,6 +334,26 @@ The complete warehouse cycle in custom Z, mirroring real SAP EWM patterns. The s
 - Status transitions on 2 upstream documents (SO → Billed, Delivery → Shipped)
 - Program `ZRET_R_INV_CREATE`
 
+### Phase 3.5 — Partner Roles SD (KNVP pattern)
+
+- 2 domains with fixed values: `ZDOM_RET_PART_FCT` (AG / WE / RE / RG) and `ZDOM_RET_CUST_TYPE` (B2B / B2C)
+- 2 data elements: `ZDE_RET_PART_FCT`, `ZDE_RET_CUST_TYPE`
+- 2 new tables in `ZRET_SD`:
+  - `ZRET_T_PART_FCT` — reference table for partner functions (delivery class C — Customizing)
+  - `ZRET_T_CUST_PRT` — assignments (customer × partner_function × counter × partner_customer)
+- Class `ZCL_RET_CUST_PARTNER` with 5 public methods:
+  - `seed_partner_functions` (idempotent setup of AG/WE/RE/RG)
+  - `assign_partner` (auto-increments `partner_counter` when multiple partners share a function)
+  - `get_partners` (full list for a sold-to)
+  - `get_partner_for_function` with **smart fallback**: returns the sold-to itself if no explicit partner is assigned (B2C pattern)
+  - `deactivate_partner` (soft delete via `active_flag`)
+- Triple validation in `assign_partner`: sold-to exists + partner customer exists + partner function valid (otherwise `zcx_ret_core` raised)
+- Program `ZRET_R_SEED_PARTNERS` with two scenarios:
+  - **B2C** (DUPONT01): no explicit assignment, all functions resolve to DUPONT01 itself via fallback
+  - **B2B Decathlon-style** (HQPARIS): 1 sold-to, 3 ship-to (DEP_LYON / DEP_MAR / DEP_LIL with auto counters 001/002/003), bill-to = HQPARIS, payer = BNPBANK
+- 6 ABAP Unit tests covering: seed idempotency, assignment happy path, validation refusal of unknown customer, smart fallback to sold-to, multi-Ship-to counter increment, deactivate-then-fallback end-to-end
+- Pattern faithful to **SAP standard table KNVP** (simplified: skipped Sales Org / Distribution Channel / Division dimensions for portfolio scope)
+
 ### Polish — F4 search helps (matchcodes)
 
 - Domains with fixed values for all status fields
@@ -429,7 +458,7 @@ The complete warehouse cycle in custom Z, mirroring real SAP EWM patterns. The s
 
 ---
 
-## Testing — ABAP Unit (46 tests green)
+## Testing — ABAP Unit (52 tests green)
 
 | Class                  | Tests | Notable patterns |
 |------------------------|-------|------------------|
@@ -438,8 +467,9 @@ The complete warehouse cycle in custom Z, mirroring real SAP EWM patterns. The s
 | `ZCL_RET_DELIVERY`     | 9     | `class_setup` for shared test customer, double-delivery prevention, lifecycle transition test |
 | `ZCL_RET_STOCK`        | 6     | Zone-aware UPSERT, atomic LUW with rollback, transfer between zones, validation cases |
 | `ZCL_RET_WH_TASK`      | 9     | Lifecycle, idempotency (cannot confirm twice), Pick → Load auto-chaining, chain stops at Load |
+| `ZCL_RET_CUST_PARTNER` | 6     | Seed idempotency, validation refusal on unknown customer, smart fallback to sold-to, multi-Ship-to counter increment, deactivate-then-fallback end-to-end |
 
-Total runtime: ~700 ms across all 46 tests.
+Total runtime: ~1.2 s across all 52 tests.
 
 **Patterns used across all tests:**
 - Test isolation via `teardown` (clean DB state after each test)
