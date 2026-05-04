@@ -456,6 +456,31 @@ The complete warehouse cycle in custom Z, mirroring real SAP EWM patterns. The s
 
 100 PC of every article in every site (4 × 3 = 12 stock lines), all in zone STORAGE, posted as movement type 561 (initial stock load) — provides a representative starting state for any demo.
 
+### Partner Roles scenarios (seeded by `ZRET_R_SEED_PARTNERS`)
+
+**6 additional customers to demonstrate B2B Decathlon-style and B2C patterns:**
+
+| ID       | Name                  | Type | City      | Role in scenarios |
+|----------|-----------------------|------|-----------|-------------------|
+| HQPARIS  | Decathlon HQ Paris    | B2B  | Paris     | Sold-to + Bill-to of B2B chain |
+| DEP_LYON | Depot Lyon            | B2B  | Lyon      | Ship-to #1 (counter 001)       |
+| DEP_MAR  | Depot Marseille       | B2B  | Marseille | Ship-to #2 (counter 002)       |
+| DEP_LIL  | Depot Lille           | B2B  | Lille     | Ship-to #3 (counter 003)       |
+| BNPBANK  | BNP Paribas Finance   | B2B  | Paris     | Payer (RG)                     |
+| DUPONT01 | Mr Dupont             | B2C  | Lyon      | All 4 roles via fallback       |
+
+**Resolved partner matrix after seed:**
+
+```
+Customer HQPARIS:                  Customer DUPONT01:
+  AG -> HQPARIS                      AG -> DUPONT01     ← fallback
+  WE -> DEP_LYON (counter 001)       WE -> DUPONT01     ← fallback
+  RE -> HQPARIS                      RE -> DUPONT01     ← fallback
+  RG -> BNPBANK                      RG -> DUPONT01     ← fallback
+```
+
+The fallback pattern means consuming code (e.g. delivery / invoice) can call `get_partner_for_function` blindly without checking for null — there's always a meaningful partner returned.
+
 ---
 
 ## Testing — ABAP Unit (52 tests green)
@@ -529,6 +554,7 @@ src/
    - Sites: run `ZRET_R_SITE_CREATE` 4 times
    - Suppliers: run `ZRET_R_SEED_SUPPLIERS` once
    - Warehouse zones + initial stock: run `ZRET_R_SEED_WHSE` once
+   - Partner Roles scenarios (B2B + B2C): run `ZRET_R_SEED_PARTNERS` once
 6. Run the **Order-to-Cash** cycle:
    - `ZRET_R_SO_CREATE` to create a sales order
    - `ZRET_R_DELIV_CREATE` to ship it (transitions SO to Delivered)
@@ -558,9 +584,9 @@ src/
 - ✅ **Phase 5.3** — Outbound EWM (Pick + Load + Goods Issue, auto-chaining Pick → Load)
 - ✅ **Refactor types** — alignment of warehouse tables on master data elements
 - ✅ **Phase 6** — RAP / Fiori Elements pipeline (List Report functional, Object Page limitation on 1909 trial documented)
+- ✅ **Phase 3.5** — SD Partner Roles (Sold-to / Ship-to / Bill-to / Payer with KNVP pattern + smart fallback)
 - ⏳ **Phase 4** — Z purchase cycle extension (vendor invoice + 3-way match)
 - ⏳ **Phase 2.5** — Article hierarchy (super-model → model → variant, Decathlon-style)
-- ⏳ **Phase 3.5** — SD Partner Roles (Sold-to / Ship-to / Bill-to / Payer)
 - ⏳ **Phase 7** — Production-readiness polish (additional tests, missing list programs, complete update methods)
 
 ---
@@ -570,7 +596,8 @@ src/
 - Some `customer_id` cities were left empty in seed data (forgot during entry, no functional impact)
 - Update method on `ZCL_RET_CUSTOMER` not yet implemented (planned for Phase 7 polish)
 - Invoice has no list program yet (`ZRET_R_INV_LIST`) — same pattern as delivery list, planned
-- No partner role concept on SO yet — planned for Phase 3.5
+- Partner Roles (Phase 3.5) is currently a **standalone module** — not yet plugged into Sales Order creation. The `ZCL_RET_SALES_ORDER.create` doesn't yet resolve Ship-to / Bill-to / Payer through `ZCL_RET_CUST_PARTNER.get_partner_for_function`. Designed and ready, integration planned for Phase 7
+- Partner Roles model simplified vs SAP standard KNVP: skipped Sales Org / Distribution Channel / Division dimensions (mono-organisation portfolio scope)
 - VAT computation is a hardcoded 20% rate as a class constant — in production, would be derived from tax code via `T007A` / pricing conditions
 - **Fiori Object Page** silently ignored on 1909 trial Docker — 5 annotation approaches tested ; List Report works perfectly. Same code would render correctly on S/4HANA recent or with a separate Gateway
 - The auto-chaining `post_goods_receipt → create_task` and `confirm_pick → create_load` runs as **3 separate LUWs** (stock movement, document update, task creation) — in production a saga pattern or compensating-transaction approach would be more robust against failures between steps. Documented and assumed for portfolio scope.
