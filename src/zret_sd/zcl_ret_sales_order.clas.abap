@@ -88,6 +88,33 @@ CLASS zcl_ret_sales_order IMPLEMENTATION.
     ls_header-changed_by     = sy-uname.
     ls_header-changed_on     = sy-datum.
 
+    " --- 4.5 Resolve partner roles via Partner Functions module ---
+    " (smart fallback: returns sold-to itself if no explicit assignment)
+    ls_header-ship_to_id = zcl_ret_cust_partner=>get_partner_for_function(
+      iv_customer_id      = is_header-customer_id
+      iv_partner_function = zcl_ret_cust_partner=>c_partner_function-ship_to ).
+
+    ls_header-bill_to_id = zcl_ret_cust_partner=>get_partner_for_function(
+      iv_customer_id      = is_header-customer_id
+      iv_partner_function = zcl_ret_cust_partner=>c_partner_function-bill_to ).
+
+    ls_header-payer_id = zcl_ret_cust_partner=>get_partner_for_function(
+      iv_customer_id      = is_header-customer_id
+      iv_partner_function = zcl_ret_cust_partner=>c_partner_function-payer ).
+
+    " Snapshot partner customer names from master
+    SELECT SINGLE customer_name FROM zret_t_customer
+      INTO @ls_header-ship_to_name
+      WHERE customer_id = @ls_header-ship_to_id.
+
+    SELECT SINGLE customer_name FROM zret_t_customer
+      INTO @ls_header-bill_to_name
+      WHERE customer_id = @ls_header-bill_to_id.
+
+    SELECT SINGLE customer_name FROM zret_t_customer
+      INTO @ls_header-payer_name
+      WHERE customer_id = @ls_header-payer_id.
+
     " --- 5. Process items via Article class ---
     DATA: lt_items_db TYPE ty_item_tab,
           ls_item_db  TYPE zret_t_so_item,
